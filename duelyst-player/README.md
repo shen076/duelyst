@@ -19,6 +19,18 @@ npm install
 npm run dev
 ```
 
+### 更新 unit attack 关系
+
+播放器会读取根目录的 `unit-attacks.json`，在播放 `units` 的 `attack` action 时叠加第一份
+`UnitAttackedFX` 并播放 `attack` SFX。资源或卡牌配置变化后运行：
+
+```sh
+npm run generate:attacks
+```
+
+生成脚本扫描 `app/resources/units`、`app/sdk/cards/factory`、`app/data/resources.js`
+和 `app/data/fx.js`。没有可匹配 FX/SFX 的 unit 仍会保留 JSON 条目，播放器会忽略缺失部分。
+
 ### 类型检查并构建生产包
 
 ```sh

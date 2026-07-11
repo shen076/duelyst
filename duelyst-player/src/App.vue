@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import unitAttacks from '../unit-attacks.json'
 
 type ResourceType = 'units' | 'fx' | 'icons' | 'particles'
 
@@ -44,6 +45,22 @@ type ImageEntry = {
   loader: () => Promise<string>
 }
 
+type AttackFx = {
+  plist: string
+  action: string | null
+  frameDelay: number
+  offset: { x: number; y: number }
+  flippedX: boolean
+}
+
+type AttackRelation = {
+  releaseDelay: number
+  fx: AttackFx | null
+  sfx: string | null
+}
+
+type UnitAttackMap = Record<string, { attackAction: string; relations: AttackRelation[] }>
+
 const resourceTypes: ResourceType[] = ['units', 'fx', 'icons', 'particles']
 const noPrefixAction = 'noPrefix'
 
@@ -60,6 +77,11 @@ const imageModules = import.meta.glob(
   },
 )
 
+const audioModules = import.meta.glob('../../app/resources/sfx/*.{m4a,mp3,ogg,wav}', {
+  query: '?url',
+  import: 'default',
+})
+
 const selectedType = ref<ResourceType | ''>('')
 const selectedPlist = ref('')
 const selectedAction = ref('')
@@ -72,6 +94,14 @@ const spriteImage = ref<HTMLImageElement | null>(null)
 const statusMessage = ref('选择资源类型和 plist 后开始播放。')
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const timerId = ref<number | null>(null)
+const fxTimerId = ref<number | null>(null)
+const fxTimeoutId = ref<number | null>(null)
+const fxImage = ref<HTMLImageElement | null>(null)
+const fxFrames = ref<SpriteFrame[]>([])
+const fxFrameCursor = ref(0)
+let attackAudio: HTMLAudioElement | null = null
+
+const attackMap = unitAttacks as UnitAttackMap
 
 const plistByType = computed<Record<ResourceType, PlistEntry[]>>(() => {
   return buildResourceMap(plistModules) as Record<ResourceType, PlistEntry[]>
@@ -108,6 +138,12 @@ const selectedFrames = computed(() => {
 })
 
 const activeFrame = computed(() => selectedFrames.value[frameCursor.value])
+
+const selectedAttackRelation = computed<AttackRelation | null>(() => {
+  if (selectedType.value !== 'units' || selectedAction.value !== 'attack') return null
+  const relations = attackMap[selectedPlist.value]?.relations ?? []
+  return relations.find((relation) => relation.fx || relation.sfx) ?? relations[0] ?? null
+})
 
 watch(selectedType, () => {
   stopPlayback()
@@ -334,12 +370,61 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   })
 }
 
-function playAction() {
+async function playAction() {
   if (!currentSheet.value || !selectedAction.value || selectedFrames.value.length === 0) return
   stopPlayback()
   frameCursor.value = 0
   drawCurrentFrame()
+  await playAttackExtras(selectedAttackRelation.value)
   startPlayback()
+}
+
+async function playAttackExtras(relation: AttackRelation | null) {
+  if (!relation) return
+
+  if (relation.sfx) {
+    const audioEntry = Object.entries(audioModules).find(([path]) => path.endsWith(`/${relation.sfx}`))
+    if (audioEntry) {
+      attackAudio = new Audio((await audioEntry[1]()) as string)
+      void attackAudio.play().catch(() => {})
+    }
+  }
+
+  if (!relation.fx) return
+  const effect = relation.fx
+  const startFx = async () => {
+    const plistEntry = plistByType.value.fx.find((entry) => entry.name === effect.plist)
+    if (!plistEntry) return
+    const sheet = parsePlist(await plistEntry.loader(), effect.plist)
+    const imageEntry = imageByType.value.fx.find(
+      (entry) => entry.name === removeExtension(sheet.textureFileName),
+    )
+    if (!imageEntry) return
+
+    fxImage.value = await loadImage(await imageEntry.loader())
+    fxFrames.value = sheet.frames
+      .filter((frame) =>
+        effect.action
+          ? removeExtension(frame.key).startsWith(`${effect.action}_`)
+          : frame.action === noPrefixAction,
+      )
+      .sort((a, b) => a.index - b.index || a.key.localeCompare(b.key))
+    fxFrameCursor.value = 0
+    drawCurrentFrame()
+
+    if (fxFrames.value.length <= 1) return
+    fxTimerId.value = window.setInterval(() => {
+      fxFrameCursor.value += 1
+      if (fxFrameCursor.value >= fxFrames.value.length) {
+        if (fxTimerId.value !== null) window.clearInterval(fxTimerId.value)
+        fxTimerId.value = null
+        fxFrames.value = []
+      }
+      drawCurrentFrame()
+    }, Math.max(effect.frameDelay, 0.01) * 1000)
+  }
+
+  fxTimeoutId.value = window.setTimeout(() => void startFx(), effect ? relation.releaseDelay * 1000 : 0)
 }
 
 function startPlayback() {
@@ -357,6 +442,7 @@ function startPlayback() {
       }
 
       frameCursor.value = 0
+      void playAttackExtras(selectedAttackRelation.value)
     } else {
       frameCursor.value = nextFrame
     }
@@ -370,6 +456,14 @@ function stopPlayback() {
     window.clearInterval(timerId.value)
     timerId.value = null
   }
+  if (fxTimerId.value !== null) window.clearInterval(fxTimerId.value)
+  if (fxTimeoutId.value !== null) window.clearTimeout(fxTimeoutId.value)
+  fxTimerId.value = null
+  fxTimeoutId.value = null
+  fxFrames.value = []
+  fxImage.value = null
+  attackAudio?.pause()
+  attackAudio = null
   isPlaying.value = false
 }
 
@@ -428,6 +522,38 @@ function drawCurrentFrame() {
     )
   }
 
+  context.restore()
+
+  const relation = selectedAttackRelation.value
+  const effectFrame = fxFrames.value[fxFrameCursor.value]
+  if (relation?.fx && fxImage.value && effectFrame) {
+    drawOverlayFrame(context, fxImage.value, effectFrame, displayWidth, displayHeight, scale, relation.fx)
+  }
+}
+
+function drawOverlayFrame(
+  context: CanvasRenderingContext2D,
+  image: HTMLImageElement,
+  frame: SpriteFrame,
+  stageWidth: number,
+  stageHeight: number,
+  scale: number,
+  effect: AttackFx,
+) {
+  context.save()
+  context.scale(scale, scale)
+  const width = frame.frame.width
+  const height = frame.frame.height
+  const x = (stageWidth - width) / 2 + frame.offset.x + effect.offset.x
+  const y = (stageHeight - height) / 2 - frame.offset.y - effect.offset.y
+
+  if (effect.flippedX) {
+    context.translate(x + width, 0)
+    context.scale(-1, 1)
+    context.drawImage(image, frame.frame.x, frame.frame.y, width, height, 0, y, width, height)
+  } else {
+    context.drawImage(image, frame.frame.x, frame.frame.y, width, height, x, y, width, height)
+  }
   context.restore()
 }
 
