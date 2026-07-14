@@ -600,6 +600,7 @@ function clearCanvas() {
 
       <label>
         <span>plist</span>
+        <span>{{ selectedPlist }}</span>
         <el-select
           v-model="selectedPlist"
           filterable
