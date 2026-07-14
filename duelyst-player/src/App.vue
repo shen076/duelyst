@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { ElOption, ElSelect } from 'element-plus'
+import 'element-plus/es/components/option/style/css'
+import 'element-plus/es/components/select/style/css'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import unitAttacks from '../unit-attacks.json'
 
@@ -383,7 +386,9 @@ async function playAttackExtras(relation: AttackRelation | null) {
   if (!relation) return
 
   if (relation.sfx) {
-    const audioEntry = Object.entries(audioModules).find(([path]) => path.endsWith(`/${relation.sfx}`))
+    const audioEntry = Object.entries(audioModules).find(([path]) =>
+      path.endsWith(`/${relation.sfx}`),
+    )
     if (audioEntry) {
       attackAudio = new Audio((await audioEntry[1]()) as string)
       void attackAudio.play().catch(() => {})
@@ -413,18 +418,24 @@ async function playAttackExtras(relation: AttackRelation | null) {
     drawCurrentFrame()
 
     if (fxFrames.value.length <= 1) return
-    fxTimerId.value = window.setInterval(() => {
-      fxFrameCursor.value += 1
-      if (fxFrameCursor.value >= fxFrames.value.length) {
-        if (fxTimerId.value !== null) window.clearInterval(fxTimerId.value)
-        fxTimerId.value = null
-        fxFrames.value = []
-      }
-      drawCurrentFrame()
-    }, Math.max(effect.frameDelay, 0.01) * 1000)
+    fxTimerId.value = window.setInterval(
+      () => {
+        fxFrameCursor.value += 1
+        if (fxFrameCursor.value >= fxFrames.value.length) {
+          if (fxTimerId.value !== null) window.clearInterval(fxTimerId.value)
+          fxTimerId.value = null
+          fxFrames.value = []
+        }
+        drawCurrentFrame()
+      },
+      Math.max(effect.frameDelay, 0.01) * 1000,
+    )
   }
 
-  fxTimeoutId.value = window.setTimeout(() => void startFx(), effect ? relation.releaseDelay * 1000 : 0)
+  fxTimeoutId.value = window.setTimeout(
+    () => void startFx(),
+    effect ? relation.releaseDelay * 1000 : 0,
+  )
 }
 
 function startPlayback() {
@@ -527,7 +538,15 @@ function drawCurrentFrame() {
   const relation = selectedAttackRelation.value
   const effectFrame = fxFrames.value[fxFrameCursor.value]
   if (relation?.fx && fxImage.value && effectFrame) {
-    drawOverlayFrame(context, fxImage.value, effectFrame, displayWidth, displayHeight, scale, relation.fx)
+    drawOverlayFrame(
+      context,
+      fxImage.value,
+      effectFrame,
+      displayWidth,
+      displayHeight,
+      scale,
+      relation.fx,
+    )
   }
 }
 
@@ -581,22 +600,36 @@ function clearCanvas() {
 
       <label>
         <span>plist</span>
-        <select v-model="selectedPlist" :disabled="!selectedType">
-          <option disabled value="">选择 plist</option>
-          <option v-for="plist in plistOptions" :key="plist.path" :value="plist.name">
-            {{ plist.name }}
-          </option>
-        </select>
+        <el-select
+          v-model="selectedPlist"
+          filterable
+          placeholder="选择或搜索 plist"
+          :disabled="!selectedType"
+        >
+          <el-option
+            v-for="plist in plistOptions"
+            :key="plist.path"
+            :label="plist.name"
+            :value="plist.name"
+          />
+        </el-select>
       </label>
 
       <label>
         <span>action</span>
-        <select v-model="selectedAction" :disabled="!currentSheet">
-          <option disabled value="">选择 action</option>
-          <option v-for="action in actionOptions" :key="action" :value="action">
-            {{ action }}
-          </option>
-        </select>
+        <el-select
+          v-model="selectedAction"
+          filterable
+          placeholder="选择或搜索 action"
+          :disabled="!currentSheet"
+        >
+          <el-option
+            v-for="action in actionOptions"
+            :key="action"
+            :label="action"
+            :value="action"
+          />
+        </el-select>
       </label>
 
       <fieldset class="radio-group">
@@ -709,6 +742,27 @@ select:disabled,
 button:disabled {
   cursor: not-allowed;
   opacity: 0.5;
+}
+
+.toolbar :deep(.el-select) {
+  width: 100%;
+}
+
+.toolbar :deep(.el-select__wrapper) {
+  min-height: 38px;
+  border: 1px solid #4a5667;
+  background: #12151a;
+  box-shadow: none;
+}
+
+.toolbar :deep(.el-select__wrapper.is-focused) {
+  border-color: #38bdf8;
+  box-shadow: 0 0 0 1px #38bdf8 inset;
+}
+
+.toolbar :deep(.el-select__selected-item),
+.toolbar :deep(.el-select__placeholder) {
+  color: #f8fafc;
 }
 
 .radio-group {
